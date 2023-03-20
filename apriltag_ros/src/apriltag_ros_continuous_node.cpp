@@ -30,12 +30,17 @@
  */
 
 #include <ros/ros.h>
-
+#include <opencv2/opencv.hpp>
 #include <nodelet/loader.h>
 
 int main(int argc, char **argv)
 {
   ros::init(argc, argv, "apriltag_ros");
+
+  // Disable opencv threading optimizations
+  // Greatly reduces CPU usage
+  // Without it opencv will also over-write CPU reduction params in settings.yaml 
+  cv::setNumThreads(0);
 
   nodelet::Loader nodelet;
   nodelet::M_string remap(ros::names::getRemappings());

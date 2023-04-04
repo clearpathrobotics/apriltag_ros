@@ -102,6 +102,15 @@ void ContinuousDetector::imageCallback (
     return;
   }
 
+  // Check for an empty image and publish an empty detection message
+  if (image_rect->data.empty())
+  {
+    AprilTagDetectionArray tag_detection_array;
+    tag_detection_array.header = image_rect->header;
+    tag_detections_publisher_.publish(tag_detection_array);
+    return;
+  }
+
   // Convert ROS's sensor_msgs::Image to cv_bridge::CvImagePtr in order to run
   // AprilTag 2 on the iamge
   try

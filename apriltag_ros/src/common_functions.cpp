@@ -30,6 +30,7 @@
  */
 
 #include "apriltag_ros/common_functions.h"
+#include "image_geometry/pinhole_camera_model.h"
 
 #include "common/homography.h"
 #include "tagStandard52h13.h"
@@ -41,7 +42,6 @@
 #include "tagCircle21h7.h"
 #include "tagCircle49h12.h"
 
-#include <std_msgs/String.h>
 #include <geometry_msgs/PoseStamped.h>
 
 namespace apriltag_ros
@@ -55,11 +55,7 @@ TagDetector::TagDetector(ros::NodeHandle pnh) :
     refine_edges_(getAprilTagOption<int>(pnh, "tag_refine_edges", 1)),
     debug_(getAprilTagOption<int>(pnh, "tag_debug", 0)),
     max_hamming_distance_(getAprilTagOption<int>(pnh, "max_hamming_dist", 2)),
-    publish_tf_(getAprilTagOption<bool>(pnh, "publish_tf", false)),
-    fov_scale_(getAprilTagOption<double>(pnh, "fov_scale", 1.0)),
-    // note that these are initially set incorrectly and must be squared
-    min_detection_dist2_(getAprilTagOption<double>(pnh, "min_detection_dist", 0.0)),
-    max_detection_dist2_(getAprilTagOption<double>(pnh, "max_detection_dist", 10.0))
+    publish_tf_(getAprilTagOption<bool>(pnh, "publish_tf", false))
 {
   // Parse standalone tag descriptions specified by user (stored on ROS
   // parameter server)
@@ -161,13 +157,6 @@ TagDetector::TagDetector(ros::NodeHandle pnh) :
   td_->refine_edges = refine_edges_;
 
   detections_ = NULL;
-
-  // square the min and max detections received from the parameters
-  min_detection_dist2_ *= min_detection_dist2_;
-  max_detection_dist2_ *= max_detection_dist2_;
-
-  optical_frame_pub_ = pnh.advertise<std_msgs::String>("/camera/detector_info/optical_frame_id", 1);
-  optical_to_target_array_sub_ = pnh.subscribe("/target/optical_frame_poses", 1, &TagDetector::opticalFramePosesCallback, this);
 }
 
 // destructor
@@ -235,43 +224,20 @@ AprilTagDetectionArray TagDetector::detectTags (
                                   .buf = gray_image.data
   };
 
-  // publish the header once for the tracker to know this detector exists
-  if (optical_frame_id_ != camera_info->header.frame_id)
-  {
-    optical_frame_id_ = camera_info->header.frame_id;
-    std_msgs::String optical_frame_id_msg;
-    optical_frame_id_msg.data = optical_frame_id_;
-    optical_frame_pub_.publish(optical_frame_id_msg);
-
-    // compute the pixel values for to the fov_scale_
-    fov_pixel_buffer_height_ = (camera_info->height/2) - ((camera_info->height * fov_scale_) / 2);
-    fov_pixel_buffer_width_ = (camera_info->width/2) - ((camera_info->width * fov_scale_) / 2);
-  }
-
-  camera_model_.fromCameraInfo(camera_info);
+  image_geometry::PinholeCameraModel camera_model;
+  camera_model.fromCameraInfo(camera_info);
 
   // Get camera intrinsic properties for rectified image.
-  double fx = camera_model_.fx(); // focal length in camera x-direction [px]
-  double fy = camera_model_.fy(); // focal length in camera y-direction [px]
-  double cx = camera_model_.cx(); // optical center x-coordinate [px]
-  double cy = camera_model_.cy(); // optical center y-coordinate [px]
+  double fx = camera_model.fx(); // focal length in camera x-direction [px]
+  double fy = camera_model.fy(); // focal length in camera y-direction [px]
+  double cx = camera_model.cx(); // optical center x-coordinate [px]
+  double cy = camera_model.cy(); // optical center y-coordinate [px]
 
   ROS_INFO_STREAM_ONCE("Camera model: fx = " << fx << ", fy = " << fy << ", cx = " << cx << ", cy = " << cy);
 
   // Check if camera intrinsics are not available - if not the calculated
   // transforms are meaningless.
   if (fx == 0 && fy == 0) ROS_WARN_STREAM_THROTTLE(5, "fx and fy are zero. Are the camera intrinsics set?");
-
-  // return if not in fov or not in the detection range
-  if (!in_fov_ || !in_detection_range_)
-  {
-    // ROS_INFO_STREAM("Frame " << optical_frame_id_ << " is either not in FOV or detection range, skipping");
-    AprilTagDetectionArray tag_detection_array;
-    tag_detection_array.header = camera_info->header;
-    return tag_detection_array;
-  }
-
-  ROS_INFO_STREAM_THROTTLE(2.0, "Frame " << optical_frame_id_ << " is in the FOV, detecting");
 
   // Run AprilTag 2 algorithm on the image
   if (detections_)
@@ -827,63 +793,6 @@ bool TagDetector::findStandaloneTagDescription (
   }
   descriptionContainer = &(description_itr->second);
   return true;
-}
-
-bool TagDetector::isTagInFOV(const tf::Transform& tag_pose) const
-{
-  if (!camera_model_.initialized())
-  {
-    ROS_WARN_STREAM_THROTTLE(5.0, "Camera not initialized, skipping FOV check");
-    return false;
-  }
-  // convert the 3d pose in the image frame to a 2d pixel frame
-  if (tag_pose.getOrigin().getZ() > 0)
-  {
-    const auto image_pt = camera_model_.project3dToPixel(
-      cv::Point3f(
-        tag_pose.getOrigin().getX(), 
-        tag_pose.getOrigin().getY(), 
-        tag_pose.getOrigin().getZ()
-      )
-    );
-    ROS_DEBUG_STREAM_THROTTLE(1.0, "Frame " << optical_frame_id_ << " has target at pixel coordinate x: " << image_pt.x << ", y: " << image_pt.y);
-
-    // check if the image is within the target fov (from image width and height in pixels), return true if it is and false otherwise
-    return fov_pixel_buffer_width_ <= image_pt.x && image_pt.x < (camera_model_.cameraInfo().width - fov_pixel_buffer_width_) && fov_pixel_buffer_height_ <= image_pt.y && image_pt.y < (camera_model_.cameraInfo().height - fov_pixel_buffer_height_);
-  }
-
-  // handles the case where Z is equal to zero (shouldn't happen) or less than zero (behind the camera)
-  return false;
-}
-
-void TagDetector::opticalFramePosesCallback(const nav_msgs::Path& poses_msg)
-{
-  if (poses_msg.poses.empty())
-  {
-    // handle empty callback; no frame poses provided by the tracker
-    in_fov_ = false;
-    return;
-  }
-
-  const auto valid_pose = std::find_if(poses_msg.poses.cbegin(), poses_msg.poses.cend(), [&](const auto& target_pose_msg) {
-    return target_pose_msg.header.frame_id == optical_frame_id_;
-  });
-
-  if (valid_pose == poses_msg.poses.cend())
-  {
-    // no tag pose set for this optical frame, assume not in fov
-    in_fov_ = false;
-    return;
-  }
-
-  // valid tag pose set, check if optical frame pose is in fov
-  tf::Transform tag_pose; 
-  tf::poseMsgToTF(valid_pose->pose, tag_pose);
-  in_fov_ = isTagInFOV(tag_pose);
-  
-  // check the detection range limits
-  const auto curr_dist2 = tag_pose.getOrigin().length2();
-  in_detection_range_ = min_detection_dist2_ <= curr_dist2 && curr_dist2 <= max_detection_dist2_;
 }
 
 } // namespace apriltag_ros

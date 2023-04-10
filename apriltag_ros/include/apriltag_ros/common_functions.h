@@ -55,11 +55,9 @@
 #include <cv_bridge/cv_bridge.h>
 #include <eigen3/Eigen/Dense>
 #include <eigen3/Eigen/Geometry>
-#include <nav_msgs/Path.h>
 #include <opencv2/opencv.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/core/core.hpp>
-#include <image_geometry/pinhole_camera_model.h>
 #include <image_transport/image_transport.h>
 #include <sensor_msgs/image_encodings.h>
 #include <tf/transform_broadcaster.h>
@@ -173,10 +171,6 @@ class TagDetector
   int max_hamming_distance_ = 2;  // Tunable, but really, 2 is a good choice. Values of >=3
                                   // consume prohibitively large amounts of memory, and otherwise
                                   // you want the largest value possible.
-  double fov_scale_;
-  // squared version of min and max detection distances (set these limits widely to not conflict with navigation)
-  double min_detection_dist2_;
-  double max_detection_dist2_;
 
   // AprilTag 2 objects
   apriltag_family_t *tf_;
@@ -190,14 +184,6 @@ class TagDetector
   bool run_quietly_;
   bool publish_tf_;
   tf::TransformBroadcaster tf_pub_;
-  ros::Publisher optical_frame_pub_; // globally publish the optical frame for the apriltag tracker to get the frame id
-  ros::Subscriber optical_to_target_array_sub_; // subscribes to a global topic of all optical frame -> target poses
-  bool in_fov_{ false }; // whether or not the target is in the camera's fov
-  bool in_detection_range_{ false }; // whether or not the target is within the config detection limits
-  std::string optical_frame_id_{ "" }; // store the frame id of this detector
-  image_geometry::PinholeCameraModel camera_model_;
-  double fov_pixel_buffer_width_;
-  double fov_pixel_buffer_height_;
 
  public:
 
@@ -249,12 +235,6 @@ class TagDetector
   void drawDetections(cv_bridge::CvImagePtr image);
 
   bool get_publish_tf() const { return publish_tf_; }
-
-  // checks if a tag is in the image fov given the tag pose in optical frame
-  bool isTagInFOV(const tf::Transform& tag_pose) const;
-
-  // get the corresponding optical frame pose (if possible) and checks if the target is in the fov
-  void opticalFramePosesCallback(const nav_msgs::Path& poses_msg);
 };
 
 } // namespace apriltag_ros

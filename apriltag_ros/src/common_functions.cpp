@@ -42,8 +42,6 @@
 #include "tagCircle21h7.h"
 #include "tagCircle49h12.h"
 
-#include <geometry_msgs/PoseStamped.h>
-
 namespace apriltag_ros
 {
 

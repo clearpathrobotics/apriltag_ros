@@ -46,9 +46,7 @@
 #include "apriltag_ros/common_functions.h"
 #include "image_geometry/pinhole_camera_model.h"
 
-#include <cpr_tf2_ros/camera_frame_transformer.h>
-#include <tf/transform_listener.h> // TODO (npalmar): remove this once validPoseSet gets moved out
-#include <tf2/LinearMath/Transform.h>
+#include <tf/transform_listener.h>
 
 #include <memory>
 #include <mutex>
@@ -75,19 +73,16 @@ class ContinuousDetector: public nodelet::Nodelet
 
  private:
   image_geometry::PinholeCameraModel camera_model_;
-  cpr_tf2_ros::CameraFrameTransformer camera_frame_transformer_;
-  tf2::Transform tag_pose_;
-  std_msgs::Header pose_base_frame_header_;
+  tf::Transform tag_pose_;
+  std::string base_frame_id_;
   tf::TransformListener tf_listener_;
 
-  double fov_size_scalar_{ 1.0 }; // scales the size of the image to produce a larger or smaller FOV size (acts as an FOV 'buffer')
+  double fov_size_scaler_{ 1.0 }; // scales the size of the image to produce a larger or smaller FOV size (acts as an FOV 'buffer')
   // squared version of min and max detection distances (set these limits widely to not conflict with navigation)
-  double min_detection_dist2_{ 0.0 }; // Minimum squared euclidean distance in 3d for the detector to run
-  double max_detection_dist2_{ 10.0 }; // Maximum squared euclidean distance in 3d for the detector to run
+  double min_detection_dist_{ 0.0 }; // Minimum euclidean distance in 3d for the detector to run
+  double max_detection_dist_{ 10.0 }; // Maximum euclidean distance in 3d for the detector to run
 
   ros::Subscriber target_pose_sub_; // subscribes to a topic with the target pose in base frame (in 3d)
-  bool in_fov_{ false }; // whether or not the target is in the camera's fov
-  bool in_detection_range_{ false }; // whether or not the target is within the config detection limits
   double fov_pixel_buffer_width_;
   double fov_pixel_buffer_height_;
 
@@ -108,17 +103,16 @@ class ContinuousDetector: public nodelet::Nodelet
   void publishEmptyDetection(const std_msgs::Header& header);
 
   // checks if a tag is in the FOV of the camera given the tag pose in optical frame
-  bool isTagInFOV(const tf2::Transform& tag_pose) const;
+  bool isTagInFOV(const tf::Transform& tag_pose) const;
 
   // checks if a tag is within the minimum and maximum detection range
-  bool isTagInDetectionRange(const tf2::Transform& tag_pose) const;
+  bool isTagInDetectionRange(const tf::Transform& tag_pose) const;
 
   // get the target pose in the base frame
   void targetPoseCallback(const geometry_msgs::PoseStamped& pose_msg);
 
-  // TODO (npalmar): fix this when it gets moved to cpr_tf2_ros
-  bool validPoseSet(const std_msgs::Header& header, tf2::Transform& target_pose,
-                                         const bool& base_to_optical);
+  // transform pose from base frame to optical frame
+  bool toOptical(const std::string& base_frame, const std::string& optical_frame, tf::Transform& tag_pose);
 };
 
 } // namespace apriltag_ros

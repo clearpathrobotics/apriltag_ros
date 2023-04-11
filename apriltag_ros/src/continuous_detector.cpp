@@ -30,7 +30,6 @@
  */
 
 #include "apriltag_ros/continuous_detector.h"
-#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 
 #include <pluginlib/class_list_macros.hpp>
 
@@ -69,15 +68,12 @@ void ContinuousDetector::onInit ()
       pnh.advertiseService("refresh_tag_params", 
                           &ContinuousDetector::refreshParamsCallback, this);
   
-  // subscribe 
   target_pose_sub_ = nh.subscribe("/target/pose_base_frame", 1, &ContinuousDetector::targetPoseCallback, this);
-  pnh.param<double>("fov_size_scalar", fov_size_scalar_, fov_size_scalar_);
+  
+  pnh.param<double>("fov_size_scaler", fov_size_scaler_, fov_size_scaler_);
   // note that these are initially set incorrectly and must be squared
-  pnh.param<double>("min_detection_dist", min_detection_dist2_, min_detection_dist2_);
-  pnh.param<double>("max_detection_dist", max_detection_dist2_, max_detection_dist2_);
-  // square the min and max detections received from the parameters
-  min_detection_dist2_ *= min_detection_dist2_;
-  max_detection_dist2_ *= max_detection_dist2_;
+  pnh.param<double>("min_detection_dist", min_detection_dist_, min_detection_dist_);
+  pnh.param<double>("max_detection_dist", max_detection_dist_, max_detection_dist_);
 }
 
 void ContinuousDetector::refreshTagParameters()
@@ -104,7 +100,7 @@ void ContinuousDetector::publishEmptyDetection(const std_msgs::Header& header)
   tag_detections_publisher_.publish(tag_detection_array);
 }
 
-bool ContinuousDetector::isTagInFOV(const tf2::Transform& tag_pose) const
+bool ContinuousDetector::isTagInFOV(const tf::Transform& tag_pose) const
 {
   if (!camera_model_.initialized())
   {
@@ -131,44 +127,35 @@ bool ContinuousDetector::isTagInFOV(const tf2::Transform& tag_pose) const
   return fov_pixel_buffer_width_ <= image_pt.x && image_pt.x < (camera_model_.cameraInfo().width - fov_pixel_buffer_width_) && fov_pixel_buffer_height_ <= image_pt.y && image_pt.y < (camera_model_.cameraInfo().height - fov_pixel_buffer_height_);
 }
 
-bool ContinuousDetector::isTagInDetectionRange(const tf2::Transform& tag_pose) const
+bool ContinuousDetector::isTagInDetectionRange(const tf::Transform& tag_pose) const
 {
-  const auto curr_dist2 = tag_pose.getOrigin().length2();
-  ROS_DEBUG_STREAM_THROTTLE(1.0, "Frame " << camera_model_.cameraInfo().header.frame_id << " has dist2 to targ: " << curr_dist2 << ", however min is " << min_detection_dist2_ << " and max dist2 is " << max_detection_dist2_);
-  return min_detection_dist2_ <= curr_dist2 && curr_dist2 <= max_detection_dist2_;
+  // distance is the z component in the optical frame
+  const auto curr_dist = tag_pose.getOrigin().getZ();
+  ROS_DEBUG_STREAM_THROTTLE(1.0, "Frame " << camera_model_.cameraInfo().header.frame_id << " has dist to targ: " << curr_dist << ", however min is " << min_detection_dist_ << " and max dist is " << max_detection_dist_);
+  return min_detection_dist_ <= curr_dist && curr_dist <= max_detection_dist_;
 }
 
 void ContinuousDetector::targetPoseCallback(const geometry_msgs::PoseStamped& pose_msg)
 {
-  tf2::fromMsg(pose_msg.pose, tag_pose_);
+  tf::poseMsgToTF(pose_msg.pose, tag_pose_);
   // the target pose should be from the base frame
-  camera_frame_transformer_.setBaseFrame(pose_msg.header.frame_id);
-  pose_base_frame_header_ = pose_msg.header;
+  base_frame_id_ = pose_msg.header.frame_id;
 }
 
-bool ContinuousDetector::validPoseSet(const std_msgs::Header& header, tf2::Transform& target_pose,
-                                         const bool& base_to_optical)
+bool ContinuousDetector::toOptical(const std::string& base_frame, const std::string& optical_frame, tf::Transform& tag_pose)
 {
-  const std::string optical_frame = header.frame_id;
-  // find the camera frame by looking at the parent to the optical frame
-  std::string camera_frame;
-  if (!tf_listener_.getParent(optical_frame, header.stamp, camera_frame))
+  tf::StampedTransform base_to_optical_tf;
+  try
   {
-    ROS_ERROR_STREAM_THROTTLE(5.0, "Failed to get the parent frame from " << optical_frame);
+    tf_listener_.lookupTransform(base_frame, optical_frame, ros::Time(0), base_to_optical_tf);
+  }
+  catch (const tf::TransformException& ex)
+  {
+    ROS_ERROR_STREAM("Could not get base to optical transformer: " << ex.what());
     return false;
   }
-  camera_frame_transformer_.setOpticalFrame(optical_frame);
-  camera_frame_transformer_.setCameraFrame(camera_frame);
-  // Convert target pose in the camera optical frame into the base frame:
-  if (!camera_frame_transformer_.update(header.stamp))
-  {
-    ROS_ERROR_STREAM_THROTTLE(5.0, "Failed to update camera frame transfomer for target pose.");
-    return false;
-  }
-
-  // convert either to optical frame or to base frame
-  base_to_optical ? camera_frame_transformer_.toOpticalFrame(target_pose) :
-                    camera_frame_transformer_.toBaseFrame(target_pose);
+  
+  tag_pose = base_to_optical_tf.inverse() * tag_pose;
   return true;
 }
 
@@ -196,20 +183,18 @@ void ContinuousDetector::imageCallback (
   }
 
   // Transform the target's pose from base link to this camera's optical frame
-  auto pose_optical_header = pose_base_frame_header_;
-  pose_optical_header.frame_id = image_rect->header.frame_id;
-  if (!validPoseSet(pose_optical_header, tag_pose_, true))
+  if (!toOptical(base_frame_id_, image_rect->header.frame_id, tag_pose_))
   {
     // ROS_INFO_STREAM_THROTTLE(1.0, "Valid pose not set");
-    publishEmptyDetection(pose_optical_header);
+    publishEmptyDetection(image_rect->header);
     return;
   }
 
   // Set the camera info
   camera_model_.fromCameraInfo(camera_info);
   // compute the pixel values for the FOV pixel buffer (ie. resizing the FOV)
-  fov_pixel_buffer_height_ = (camera_info->height/2) - ((camera_info->height * fov_size_scalar_) / 2);
-  fov_pixel_buffer_width_ = (camera_info->width/2) - ((camera_info->width * fov_size_scalar_) / 2);
+  fov_pixel_buffer_height_ = (camera_info->height/2) - ((camera_info->height * fov_size_scaler_) / 2);
+  fov_pixel_buffer_width_ = (camera_info->width/2) - ((camera_info->width * fov_size_scaler_) / 2);
 
   // Check if not in fov or not in detection range and publish an empty detection message
   if (!isTagInFOV(tag_pose_) || !isTagInDetectionRange(tag_pose_))

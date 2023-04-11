@@ -78,11 +78,15 @@ class ContinuousDetector: public nodelet::Nodelet
   tf::TransformListener tf_listener_;
 
   double fov_size_scaler_{ 1.0 }; // scales the size of the image to produce a larger or smaller FOV size (acts as an FOV 'buffer')
-  // squared version of min and max detection distances (set these limits widely to not conflict with navigation)
-  double min_detection_dist_{ 0.0 }; // Minimum distance in 3d for the detector to run
-  double max_detection_dist_{ 10.0 }; // Maximum distance in 3d for the detector to run
+  // set these limits widely to not conflict with navigation
+  double min_detection_dist_{ 0.0 }; // Minimum distance for the detector to run
+  double max_detection_dist_{ 10.0 }; // Maximum distance for the detector to run
+  // How long (in seconds) the target has to be outside of the detector's FOV/range before turning off the detector
+  double detector_timeout_{ 2.0 }; 
 
   ros::Subscriber target_pose_sub_; // subscribes to a topic with the target pose in base frame (in 3d)
+  ros::Timer detection_timer_;
+  bool detection_timeout_;
   double fov_pixel_buffer_width_;
   double fov_pixel_buffer_height_;
 
@@ -113,6 +117,9 @@ class ContinuousDetector: public nodelet::Nodelet
 
   // transform pose from base frame (frame in the tag_pose_header) to optical frame
   bool toOptical(const std_msgs::Header& tag_pose_header, const std::string& optical_frame, tf::Transform& tag_pose);
+
+  // handle a detector timeout
+  void detectorTimeoutCallback(const ros::TimerEvent&);
 };
 
 } // namespace apriltag_ros

@@ -102,11 +102,8 @@ class ContinuousDetector: public nodelet::Nodelet
   // publishes an empty detection
   void publishEmptyDetection(const std_msgs::Header& header);
 
-  // helper to convert tf::Vector3 to cv::Point3f
-  cv::Point3f toCvPoint3f(const tf::Vector3& position);
-
   // checks if a tag is in the FOV of the camera given the tag pose in optical frame
-  bool isTagInFOV(const tf::Transform& tag_pose);
+  bool isTagInFOV(const tf::Transform& tag_pose) const;
 
   // checks if a tag is within the minimum and maximum detection range
   bool isTagInDetectionRange(const tf::Transform& tag_pose) const;

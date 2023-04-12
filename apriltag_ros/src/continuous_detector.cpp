@@ -101,12 +101,12 @@ void ContinuousDetector::publishEmptyDetection(const std_msgs::Header& header)
   tag_detections_publisher_.publish(tag_detection_array);
 }
 
-cv::Point3f ContinuousDetector::toCvPoint3f(const tf::Vector3& position)
+cv::Point3f toCvPoint3f(const tf::Vector3& position)
 {
   return cv::Point3f(position.getX(), position.getY(), position.getZ());
 }
 
-bool ContinuousDetector::isTagInFOV(const tf::Transform& tag_pose)
+bool ContinuousDetector::isTagInFOV(const tf::Transform& tag_pose) const
 {
   if (!camera_model_.initialized())
   {

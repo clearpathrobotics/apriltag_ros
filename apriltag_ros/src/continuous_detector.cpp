@@ -42,10 +42,10 @@ void ContinuousDetector::onInit ()
   ros::NodeHandle& nh = getNodeHandle();
   ros::NodeHandle& pnh = getPrivateNodeHandle();
 
-  pnh.param<double>("fov_size_scaler", fov_size_scaler_, fov_size_scaler_);
-  pnh.param<double>("min_detection_dist", min_detection_dist_, min_detection_dist_);
-  pnh.param<double>("max_detection_dist", max_detection_dist_, max_detection_dist_);
-  pnh.param<double>("detector_timeout", detector_timeout_, detector_timeout_);
+  pnh.param("fov_size_scaler", fov_size_scaler_, fov_size_scaler_);
+  pnh.param("min_detection_dist", min_detection_dist_, min_detection_dist_);
+  pnh.param("max_detection_dist", max_detection_dist_, max_detection_dist_);
+  pnh.param("detection_timeout", detection_timeout_, detection_timeout_);
 
   tag_detector_ = std::shared_ptr<TagDetector>(new TagDetector(pnh));
   draw_tag_detections_image_ = getAprilTagOption<bool>(pnh, 
@@ -75,9 +75,6 @@ void ContinuousDetector::onInit ()
   
   target_pose_sub_ = nh.subscribe("/target/pose_base_frame", 
                         1, &ContinuousDetector::targetPoseCallback, this);
-  
-  detection_timer_ = nh.createTimer(ros::Duration(detector_timeout_), 
-                        &ContinuousDetector::detectorTimeoutCallback, this, false, false);
 }
 
 void ContinuousDetector::refreshTagParameters()
@@ -172,12 +169,6 @@ bool ContinuousDetector::toOptical(const std_msgs::Header& tag_pose_header,
   return true;
 }
 
-void ContinuousDetector::detectorTimeoutCallback(const ros::TimerEvent&)
-{
-  detection_timeout_ = true;
-  detection_timer_.stop();
-}
-
 void ContinuousDetector::imageCallback (
     const sensor_msgs::ImageConstPtr& image_rect,
     const sensor_msgs::CameraInfoConstPtr& camera_info)
@@ -216,15 +207,18 @@ void ContinuousDetector::imageCallback (
   fov_pixel_buffer_height_ = cam_resolution.height * fov_scale;
   fov_pixel_buffer_width_ = cam_resolution.width * fov_scale;
 
-  // Check if not in fov or not in detection range and publish an empty detection message
   if (!isTagInFOV(tag_pose_) || !isTagInDetectionRange(tag_pose_))
   {
-    if (detection_timeout_)
+    // only publish an empty detection if the timeout is exceeded
+    if ((image_rect->header.stamp - last_valid_detection_).toSec() > detection_timeout_)
     {
       publishEmptyDetection(image_rect->header);
       return;
     }
-    detector_validations_failed = true;
+  }
+  else
+  {
+    last_valid_detection_ = image_rect->header.stamp;
   }
 
   // Convert ROS's sensor_msgs::Image to cv_bridge::CvImagePtr in order to run
@@ -242,14 +236,6 @@ void ContinuousDetector::imageCallback (
   // Publish detected tags in the image by AprilTag 2
   tag_detections_publisher_.publish(
       tag_detector_->detectTags(cv_image_,camera_info));
-  
-  // only reset the timer if the validations were passed
-  if (!detector_validations_failed)
-  {
-    detection_timer_.stop();
-    detection_timer_.start();
-    detection_timeout_ = false;
-  }
 
   // Publish the camera image overlaid by outlines of the detected tags and
   // their payload values

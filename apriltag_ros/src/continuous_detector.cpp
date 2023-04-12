@@ -103,7 +103,7 @@ void ContinuousDetector::publishEmptyDetection(const std_msgs::Header& header)
 
 cv::Point3f ContinuousDetector::toCvPoint3f(const tf::Vector3& position)
 {
-  return { position.getX(), position.getY(), position.getZ() };
+  return cv::Point3f(position.getX(), position.getY(), position.getZ());
 }
 
 bool ContinuousDetector::isTagInFOV(const tf::Transform& tag_pose)

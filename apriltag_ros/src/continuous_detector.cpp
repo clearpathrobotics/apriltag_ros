@@ -68,7 +68,8 @@ void ContinuousDetector::onInit ()
       pnh.advertiseService("refresh_tag_params", 
                           &ContinuousDetector::refreshParamsCallback, this);
   
-  target_pose_sub_ = nh.subscribe("/target/pose_base_frame", 1, &ContinuousDetector::targetPoseCallback, this);
+  target_pose_sub_ = nh.subscribe("/target/pose_base_frame", 
+                        1, &ContinuousDetector::targetPoseCallback, this);
   
   pnh.param<double>("fov_size_scaler", fov_size_scaler_, fov_size_scaler_);
   // note that these are initially set incorrectly and must be squared
@@ -100,38 +101,45 @@ void ContinuousDetector::publishEmptyDetection(const std_msgs::Header& header)
   tag_detections_publisher_.publish(tag_detection_array);
 }
 
-bool ContinuousDetector::isTagInFOV(const tf::Transform& tag_pose) const
+cv::Point3f ContinuousDetector::toCvPoint3f(const tf::Vector3& position)
+{
+  return { position.getX(), position.getY(), position.getZ() };
+}
+
+bool ContinuousDetector::isTagInFOV(const tf::Transform& tag_pose)
 {
   if (!camera_model_.initialized())
   {
     ROS_WARN_STREAM_THROTTLE(1.0, "Camera not initialized, skipping FOV check");
     return false;
   }
+
   if (tag_pose.getOrigin().getZ() <= 0)
   {
-    // handles the case where Z is equal to zero (shouldn't happen) or less than zero (behind the camera)
+    // handles Z = 0 (shouldn't happen) or Z < 0 (behind the camera)
     return false;
   }
 
   // convert the 3d pose in the image frame to a 2d pixel frame
-  const auto image_pt = camera_model_.project3dToPixel(
-    cv::Point3f(
-      tag_pose.getOrigin().getX(), 
-      tag_pose.getOrigin().getY(), 
-      tag_pose.getOrigin().getZ()
-    )
-  );
-  ROS_DEBUG_STREAM_THROTTLE(1.0, "Frame " << camera_model_.cameraInfo().header.frame_id << " has target at pixel coordinate x: " << image_pt.x << ", y: " << image_pt.y);
+  const auto image_pt = camera_model_.project3dToPixel(toCvPoint3f(tag_pose.getOrigin()));
+  ROS_DEBUG_STREAM_THROTTLE(1.0, 
+    "Frame " << camera_model_.cameraInfo().header.frame_id 
+      << " has target at pixel coordinate x: " << image_pt.x << ", y: " << image_pt.y);
 
-  // check if the image is within the target fov (from image width and height in pixels), return true if it is and false otherwise
-  return fov_pixel_buffer_width_ <= image_pt.x && image_pt.x < (camera_model_.cameraInfo().width - fov_pixel_buffer_width_) && fov_pixel_buffer_height_ <= image_pt.y && image_pt.y < (camera_model_.cameraInfo().height - fov_pixel_buffer_height_);
+  // check if the image is within the target fov
+  return (fov_pixel_buffer_width_ <= image_pt.x 
+    && image_pt.x < (camera_model_.reducedResolution().width - fov_pixel_buffer_width_) 
+    && fov_pixel_buffer_height_ <= image_pt.y 
+    && image_pt.y < (camera_model_.reducedResolution().height - fov_pixel_buffer_height_));
 }
 
 bool ContinuousDetector::isTagInDetectionRange(const tf::Transform& tag_pose) const
 {
   // distance is the z component in the optical frame
   const auto curr_dist = tag_pose.getOrigin().getZ();
-  ROS_DEBUG_STREAM_THROTTLE(1.0, "Frame " << camera_model_.cameraInfo().header.frame_id << " has dist to targ: " << curr_dist << ", however min is " << min_detection_dist_ << " and max dist is " << max_detection_dist_);
+  ROS_DEBUG_STREAM_THROTTLE(1.0, 
+    "Frame " << camera_model_.cameraInfo().header.frame_id << " has dist to targ: " << curr_dist
+      << ", however min is " << min_detection_dist_ << " and max dist is " << max_detection_dist_);
   return min_detection_dist_ <= curr_dist && curr_dist <= max_detection_dist_;
 }
 
@@ -141,16 +149,18 @@ void ContinuousDetector::targetPoseCallback(const geometry_msgs::PoseStamped& po
   robot_pose_header_ = pose_msg.header;
 }
 
-bool ContinuousDetector::toOptical(const std_msgs::Header& tag_pose_header, const std::string& optical_frame,  tf::Transform& tag_pose)
+bool ContinuousDetector::toOptical(const std_msgs::Header& tag_pose_header, 
+  const std::string& optical_frame, tf::Transform& tag_pose)
 {
   tf::StampedTransform base_to_optical_tf;
   try
   {
-    tf_listener_.lookupTransform(tag_pose_header.frame_id, optical_frame, tag_pose_header.stamp, base_to_optical_tf);
+    tf_listener_.lookupTransform(tag_pose_header.frame_id, 
+      optical_frame, tag_pose_header.stamp, base_to_optical_tf);
   }
   catch (const tf::TransformException& ex)
   {
-    ROS_ERROR_STREAM("Could not get base to optical transformer: " << ex.what());
+    ROS_ERROR_STREAM("Could not get base to optical transform: " << ex.what());
     return false;
   }
   
@@ -181,7 +191,7 @@ void ContinuousDetector::imageCallback (
     return;
   }
 
-  // Transform the target's pose (set in the targetPoseCallback) from base link to this camera's optical frame
+  // Transform the tag pose from robot's base frame to optical frame
   if (!toOptical(robot_pose_header_, image_rect->header.frame_id, tag_pose_))
   {
     publishEmptyDetection(image_rect->header);
@@ -191,8 +201,10 @@ void ContinuousDetector::imageCallback (
   // Set the camera info
   camera_model_.fromCameraInfo(camera_info);
   // compute the pixel values for the FOV pixel buffer (ie. resizing the FOV)
-  fov_pixel_buffer_height_ = (camera_model_.reducedResolution().height/2) - ((camera_model_.reducedResolution().height * fov_size_scaler_) / 2);
-  fov_pixel_buffer_width_ = (camera_model_.reducedResolution().width/2) - ((camera_model_.reducedResolution().width * fov_size_scaler_) / 2);
+  fov_pixel_buffer_height_ = (camera_model_.reducedResolution().height/2 
+    - (camera_model_.reducedResolution().height * fov_size_scaler_) / 2);
+  fov_pixel_buffer_width_ = (camera_model_.reducedResolution().width/2 
+    - (camera_model_.reducedResolution().width * fov_size_scaler_) / 2);
 
   // Check if not in fov or not in detection range and publish an empty detection message
   if (!isTagInFOV(tag_pose_) || !isTagInDetectionRange(tag_pose_))

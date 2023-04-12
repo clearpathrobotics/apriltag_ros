@@ -138,16 +138,15 @@ bool ContinuousDetector::isTagInDetectionRange(const tf::Transform& tag_pose) co
 void ContinuousDetector::targetPoseCallback(const geometry_msgs::PoseStamped& pose_msg)
 {
   tf::poseMsgToTF(pose_msg.pose, tag_pose_);
-  // the target pose should be from the base frame
-  base_frame_id_ = pose_msg.header.frame_id;
+  robot_pose_header_ = pose_msg.header;
 }
 
-bool ContinuousDetector::toOptical(const std::string& base_frame, const std::string& optical_frame, tf::Transform& tag_pose)
+bool ContinuousDetector::toOptical(const std_msgs::Header& tag_pose_header, const std::string& optical_frame,  tf::Transform& tag_pose)
 {
   tf::StampedTransform base_to_optical_tf;
   try
   {
-    tf_listener_.lookupTransform(base_frame, optical_frame, ros::Time(0), base_to_optical_tf);
+    tf_listener_.lookupTransform(tag_pose_header.frame_id, optical_frame, tag_pose_header.stamp, base_to_optical_tf);
   }
   catch (const tf::TransformException& ex)
   {
@@ -182,10 +181,9 @@ void ContinuousDetector::imageCallback (
     return;
   }
 
-  // Transform the target's pose from base link to this camera's optical frame
-  if (!toOptical(base_frame_id_, image_rect->header.frame_id, tag_pose_))
+  // Transform the target's pose (set in the targetPoseCallback) from base link to this camera's optical frame
+  if (!toOptical(robot_pose_header_, image_rect->header.frame_id, tag_pose_))
   {
-    // ROS_INFO_STREAM_THROTTLE(1.0, "Valid pose not set");
     publishEmptyDetection(image_rect->header);
     return;
   }
@@ -193,18 +191,15 @@ void ContinuousDetector::imageCallback (
   // Set the camera info
   camera_model_.fromCameraInfo(camera_info);
   // compute the pixel values for the FOV pixel buffer (ie. resizing the FOV)
-  fov_pixel_buffer_height_ = (camera_info->height/2) - ((camera_info->height * fov_size_scaler_) / 2);
-  fov_pixel_buffer_width_ = (camera_info->width/2) - ((camera_info->width * fov_size_scaler_) / 2);
+  fov_pixel_buffer_height_ = (camera_model_.reducedResolution().height/2) - ((camera_model_.reducedResolution().height * fov_size_scaler_) / 2);
+  fov_pixel_buffer_width_ = (camera_model_.reducedResolution().width/2) - ((camera_model_.reducedResolution().width * fov_size_scaler_) / 2);
 
   // Check if not in fov or not in detection range and publish an empty detection message
   if (!isTagInFOV(tag_pose_) || !isTagInDetectionRange(tag_pose_))
   {
-    // ROS_INFO_STREAM_THROTTLE(1.0, "FOV or range check not passed");
     publishEmptyDetection(image_rect->header);
     return;
   }
-
-  // ROS_INFO_STREAM_THROTTLE(0.1, "Frame " << image_rect->header.frame_id << " is in the FOV, detecting");
 
   // Convert ROS's sensor_msgs::Image to cv_bridge::CvImagePtr in order to run
   // AprilTag 2 on the iamge

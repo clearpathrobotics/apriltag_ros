@@ -74,13 +74,13 @@ class ContinuousDetector: public nodelet::Nodelet
  private:
   image_geometry::PinholeCameraModel camera_model_;
   tf::Transform tag_pose_;
-  std::string base_frame_id_;
+  std_msgs::Header robot_pose_header_;
   tf::TransformListener tf_listener_;
 
   double fov_size_scaler_{ 1.0 }; // scales the size of the image to produce a larger or smaller FOV size (acts as an FOV 'buffer')
   // squared version of min and max detection distances (set these limits widely to not conflict with navigation)
-  double min_detection_dist_{ 0.0 }; // Minimum euclidean distance in 3d for the detector to run
-  double max_detection_dist_{ 10.0 }; // Maximum euclidean distance in 3d for the detector to run
+  double min_detection_dist_{ 0.0 }; // Minimum distance in 3d for the detector to run
+  double max_detection_dist_{ 10.0 }; // Maximum distance in 3d for the detector to run
 
   ros::Subscriber target_pose_sub_; // subscribes to a topic with the target pose in base frame (in 3d)
   double fov_pixel_buffer_width_;
@@ -111,8 +111,8 @@ class ContinuousDetector: public nodelet::Nodelet
   // get the target pose in the base frame
   void targetPoseCallback(const geometry_msgs::PoseStamped& pose_msg);
 
-  // transform pose from base frame to optical frame
-  bool toOptical(const std::string& base_frame, const std::string& optical_frame, tf::Transform& tag_pose);
+  // transform pose from base frame (frame in the tag_pose_header) to optical frame
+  bool toOptical(const std_msgs::Header& tag_pose_header, const std::string& optical_frame,  tf::Transform& tag_pose);
 };
 
 } // namespace apriltag_ros

@@ -44,6 +44,9 @@
 #define APRILTAG_ROS_CONTINUOUS_DETECTOR_H
 
 #include "apriltag_ros/common_functions.h"
+#include "image_geometry/pinhole_camera_model.h"
+
+#include <tf/transform_listener.h>
 
 #include <memory>
 #include <mutex>
@@ -69,6 +72,20 @@ class ContinuousDetector: public nodelet::Nodelet
   void refreshTagParameters();
 
  private:
+  image_geometry::PinholeCameraModel camera_model_;
+  tf::Transform tag_pose_;
+  std_msgs::Header robot_pose_header_;
+  tf::TransformListener tf_listener_;
+
+  double fov_size_scaler_{ 1.0 }; // scales the size of the image to produce a larger or smaller FOV size (acts as an FOV 'buffer')
+  // squared version of min and max detection distances (set these limits widely to not conflict with navigation)
+  double min_detection_dist_{ 0.0 }; // Minimum distance in 3d for the detector to run
+  double max_detection_dist_{ 10.0 }; // Maximum distance in 3d for the detector to run
+
+  ros::Subscriber target_pose_sub_; // subscribes to a topic with the target pose in base frame (in 3d)
+  double fov_pixel_buffer_width_;
+  double fov_pixel_buffer_height_;
+
   std::mutex detection_mutex_;
   std::shared_ptr<TagDetector> tag_detector_;
   bool draw_tag_detections_image_;
@@ -81,6 +98,21 @@ class ContinuousDetector: public nodelet::Nodelet
 
   ros::ServiceServer refresh_params_service_;
   bool refreshParamsCallback(std_srvs::Empty::Request& req, std_srvs::Empty::Response& res);
+
+  // publishes an empty detection
+  void publishEmptyDetection(const std_msgs::Header& header);
+
+  // checks if a tag is in the FOV of the camera given the tag pose in optical frame
+  bool isTagInFOV(const tf::Transform& tag_pose) const;
+
+  // checks if a tag is within the minimum and maximum detection range
+  bool isTagInDetectionRange(const tf::Transform& tag_pose) const;
+
+  // get the target pose in the base frame
+  void targetPoseCallback(const geometry_msgs::PoseStamped& pose_msg);
+
+  // transform pose from base frame (frame in the tag_pose_header) to optical frame
+  bool toOptical(const std_msgs::Header& tag_pose_header, const std::string& optical_frame, tf::Transform& tag_pose);
 };
 
 } // namespace apriltag_ros

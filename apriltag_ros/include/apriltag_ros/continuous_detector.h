@@ -77,14 +77,18 @@ class ContinuousDetector: public nodelet::Nodelet
   std_msgs::Header robot_pose_header_;
   tf::TransformListener tf_listener_;
 
-  double fov_size_scaler_{ 1.0 }; // scales the size of the image to produce a larger or smaller FOV size (acts as an FOV 'buffer')
-  // squared version of min and max detection distances (set these limits widely to not conflict with navigation)
-  double min_detection_dist_{ 0.0 }; // Minimum distance in 3d for the detector to run
-  double max_detection_dist_{ 10.0 }; // Maximum distance in 3d for the detector to run
+  // scales the size of the image to produce a larger or smaller FOV size (acts as an FOV 'buffer')
+  double fov_size_scaler_{ 1.0 };
+  // set these limits widely to not conflict with navigation
+  double min_detection_dist_{ 0.0 }; // Minimum distance for the detector to run
+  double max_detection_dist_{ 10.0 }; // Maximum distance for the detector to run
+  // How long (in seconds) the target has to be outside of the detector's FOV/range before turning off the detector
+  double detection_timeout_{ 2.0 }; 
 
   ros::Subscriber target_pose_sub_; // subscribes to a topic with the target pose in base frame (in 3d)
   double fov_pixel_buffer_width_;
   double fov_pixel_buffer_height_;
+  ros::Time last_valid_detection_;
 
   std::mutex detection_mutex_;
   std::shared_ptr<TagDetector> tag_detector_;

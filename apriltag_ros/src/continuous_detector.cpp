@@ -160,7 +160,8 @@ bool ContinuousDetector::toOptical(const std_msgs::Header& tag_pose_header,
   }
   catch (const tf::TransformException& ex)
   {
-    ROS_ERROR_STREAM("Could not get base to optical transform: " << ex.what());
+    ROS_ERROR_STREAM("Could not get " << tag_pose_header.frame_id 
+      << " to " << optical_frame << " transform: " << ex.what()); 
     return false;
   }
   
@@ -201,10 +202,10 @@ void ContinuousDetector::imageCallback (
   // Set the camera info
   camera_model_.fromCameraInfo(camera_info);
   // compute the pixel values for the FOV pixel buffer (ie. resizing the FOV)
-  fov_pixel_buffer_height_ = (camera_model_.reducedResolution().height/2 
-    - (camera_model_.reducedResolution().height * fov_size_scaler_) / 2);
-  fov_pixel_buffer_width_ = (camera_model_.reducedResolution().width/2 
-    - (camera_model_.reducedResolution().width * fov_size_scaler_) / 2);
+  const auto cam_resolution = camera_model_.reducedResolution();
+  const auto fov_scale = 0.5 * (1.0 - fov_size_scaler_);
+  fov_pixel_buffer_height_ = cam_resolution.height * fov_scale;
+  fov_pixel_buffer_width_ = cam_resolution.width * fov_scale;
 
   // Check if not in fov or not in detection range and publish an empty detection message
   if (!isTagInFOV(tag_pose_) || !isTagInDetectionRange(tag_pose_))

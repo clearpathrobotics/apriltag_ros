@@ -127,10 +127,11 @@ bool ContinuousDetector::isTagInFOV(const tf::Transform& tag_pose) const
       << " has target at pixel coordinate x: " << image_pt.x << ", y: " << image_pt.y);
 
   // check if the image is within the target fov
+  const auto camera_resolution = camera_model_.reducedResolution();
   return (fov_pixel_buffer_width_ <= image_pt.x 
-    && image_pt.x < (camera_model_.reducedResolution().width - fov_pixel_buffer_width_) 
+    && image_pt.x < (camera_resolution.width - fov_pixel_buffer_width_) 
     && fov_pixel_buffer_height_ <= image_pt.y 
-    && image_pt.y < (camera_model_.reducedResolution().height - fov_pixel_buffer_height_));
+    && image_pt.y < (camera_resolution.height - fov_pixel_buffer_height_));
 }
 
 bool ContinuousDetector::isTagInDetectionRange(const tf::Transform& tag_pose) const
@@ -202,10 +203,10 @@ void ContinuousDetector::imageCallback (
   // Set the camera info
   camera_model_.fromCameraInfo(camera_info);
   // compute the pixel values for the FOV pixel buffer (ie. resizing the FOV)
-  const auto cam_resolution = camera_model_.reducedResolution();
+  const auto camera_resolution = camera_model_.reducedResolution();
   const auto fov_scale = 0.5 * (1.0 - fov_size_scaler_);
-  fov_pixel_buffer_height_ = cam_resolution.height * fov_scale;
-  fov_pixel_buffer_width_ = cam_resolution.width * fov_scale;
+  fov_pixel_buffer_height_ = camera_resolution.height * fov_scale;
+  fov_pixel_buffer_width_ = camera_resolution.width * fov_scale;
 
   if (!isTagInFOV(tag_pose_) || !isTagInDetectionRange(tag_pose_))
   {

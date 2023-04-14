@@ -127,10 +127,11 @@ bool ContinuousDetector::isTagInFOV(const tf::Transform& tag_pose) const
       << " has target at pixel coordinate x: " << image_pt.x << ", y: " << image_pt.y);
 
   // check if the image is within the target fov
+  const auto cam_resolution = camera_model_.reducedResolution();
   return (fov_pixel_buffer_width_ <= image_pt.x 
-    && image_pt.x < (camera_model_.reducedResolution().width - fov_pixel_buffer_width_) 
+    && image_pt.x < (cam_resolution.width - fov_pixel_buffer_width_) 
     && fov_pixel_buffer_height_ <= image_pt.y 
-    && image_pt.y < (camera_model_.reducedResolution().height - fov_pixel_buffer_height_));
+    && image_pt.y < (cam_resolution.height - fov_pixel_buffer_height_));
 }
 
 bool ContinuousDetector::isTagInDetectionRange(const tf::Transform& tag_pose) const
